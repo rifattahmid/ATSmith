@@ -1,6 +1,7 @@
-# Project Memory — Auto Resume & Cover Letter Generator
+# Project Memory — Auto Resume & Cover Letter Tailor 🪡
 
-Use this file to onboard a new Claude instance. Paste it at the start of your chat, then describe the issue or task.
+Use this file to onboard a new AI assistant instance for debugging or feature work.
+Paste it at the start of your chat, then describe the issue or task.
 
 ---
 
@@ -9,19 +10,20 @@ Use this file to onboard a new Claude instance. Paste it at the start of your ch
 Given a job posting URL, automatically:
 1. Scrapes the job title, company, country, and description using Playwright + Claude Haiku
 2. Auto-detects the job country, matches against `locations.json`
-3. Shows an arrow-key country selector (pre-selected to detected or `DEFAULT_PROFILE`)
+3. If detected: uses that profile silently. If not: shows an arrow-key country selector
 4. Classifies the role against template subfolders using a keyword scorer (`keywords.json`)
 5. Copies the matching resume template to an output folder
 6. Fills `_` blanks in the cover letter template using Claude Haiku — only the sentence(s) containing `_`, everything else untouched
 7. Converts `.docx` to PDF via Microsoft Word and opens the output folder
+8. Optionally merges cover letter with supplementary PDFs into a bundle (skipped if `BUNDLE_APPENDIX` is empty)
 
 ---
 
 ## File structure
 
 ```
-auto-resume-cover-letter/
-├── apply.py                # Entry point — scrape, country select, generate
+auto-resume-cover-letter-tailor/
+├── apply.py                # Entry point — scrape, country detect, generate
 ├── scraper.py              # Playwright scraper — extracts job data including country
 ├── generator.py            # Classifier + cover letter filler + PDF conversion
 ├── config.py               # USER-SPECIFIC settings (gitignored)
@@ -33,7 +35,8 @@ auto-resume-cover-letter/
 ├── locations.json          # USER-SPECIFIC country/city location map (gitignored)
 ├── locations.example.json  # Example covering 11 countries
 ├── requirements.txt        # anthropic, python-docx, docx2pdf, pypdf, python-dotenv, playwright, pywin32, questionary
-├── .env                    # ANTHROPIC_API_KEY (gitignored)
+├── .env                    # LLM API key (gitignored)
+├── .env.example            # API key template — includes Anthropic, OpenAI, Groq, DeepSeek, etc.
 └── .gitignore
 ```
 
@@ -46,10 +49,9 @@ auto-resume-cover-letter/
 OUTPUT_BASE               # path where generated folders are saved
 TEMPLATE_BASE             # path to template subfolders
 SUPPLEMENTARY_FILES       # extra PDFs uploaded alongside resume
-BUNDLE_APPENDIX           # PDFs merged into cover letter bundle PDF
+BUNDLE_APPENDIX           # PDFs merged into cover letter bundle PDF — skip merge if []
 
-# Multi-country (optional — enables arrow-key country selector)
-DEFAULT_PROFILE = "Malaysia"
+# Multi-country (optional — enables country detection + selector)
 PROFILES = {
     "Malaysia":  { "OUTPUT_BASE": ..., "TEMPLATE_BASE": ... },
     "Australia": { "OUTPUT_BASE": ..., "TEMPLATE_BASE": ... },
@@ -57,10 +59,12 @@ PROFILES = {
     "Canada":    { "OUTPUT_BASE": ..., "TEMPLATE_BASE": ... },
     "Brunei":    { "OUTPUT_BASE": ..., "TEMPLATE_BASE": ... },
 }
-# Fallback (auto-set from DEFAULT_PROFILE)
-OUTPUT_BASE   = PROFILES[DEFAULT_PROFILE]["OUTPUT_BASE"]
-TEMPLATE_BASE = PROFILES[DEFAULT_PROFILE]["TEMPLATE_BASE"]
+# Fallback — auto-set to first profile in dict
+OUTPUT_BASE   = next(iter(PROFILES.values()))["OUTPUT_BASE"]
+TEMPLATE_BASE = next(iter(PROFILES.values()))["TEMPLATE_BASE"]
 ```
+
+No `DEFAULT_PROFILE` key — first entry in `PROFILES` is always the default.
 
 ---
 
@@ -68,13 +72,15 @@ TEMPLATE_BASE = PROFILES[DEFAULT_PROFILE]["TEMPLATE_BASE"]
 
 1. Prompt for job URL
 2. `scrape_job(url)` → returns `data` dict including `country`
-3. If `PROFILES` defined in config:
+3. Blank line printed for visual separation
+4. If `PROFILES` defined in config:
    - `_load_locations()` reads `locations.json` from project root
    - `_detect_profile(country, locations)` matches country string against location lists
-   - `questionary.select` menu shown, pre-selected to detected (or `DEFAULT_PROFILE`)
+   - If detected: print `Country: X` and use that profile silently — no menu shown
+   - If not detected: print `Location not detected` and show `questionary.select` menu
    - `config.OUTPUT_BASE` and `config.TEMPLATE_BASE` overridden with chosen profile
-4. User confirms/corrects company name
-5. `generate_application(data)` called
+5. User confirms/corrects company name
+6. `generate_application(data)` called
 
 ---
 
@@ -96,7 +102,7 @@ Scores available template subfolders against keywords. Title matches x3 weight. 
 - No em dashes in output (enforced in prompt)
 
 **`generate_application(data)`**
-Orchestrates: classify -> copy templates -> fill cover letter -> convert to PDF -> merge bundle -> open output folder.
+Orchestrates: classify -> copy templates -> fill cover letter -> convert to PDF -> merge bundle (only if `BUNDLE_APPENDIX` is non-empty) -> open output folder.
 
 ---
 
@@ -146,7 +152,7 @@ Keys must match template subfolder names (case-insensitive). Keys starting with 
 - `_` = company/role-specific content only (what the company does, why applicant is drawn to it)
 - Fixed sentences (experience, background, tools) are NEVER modified
 - Only the sentence(s) containing `_` are sent to Claude — rest of paragraph untouched
-- No em dashes (--) or en dashes (-) in output
+- No em dashes or en dashes in output
 
 ---
 
@@ -176,6 +182,14 @@ Subfolder names must match keys in `keywords.json`.
 | `python-docx` | Read/write `.docx` templates |
 | `docx2pdf` | `.docx` -> PDF via Microsoft Word (Windows only) |
 | `pypdf` | Merge cover letter bundle PDFs |
-| `python-dotenv` | Load `ANTHROPIC_API_KEY` from `.env` |
+| `python-dotenv` | Load API key from `.env` |
 | `questionary` | Arrow-key country selector in terminal |
 | `pywin32` | Windows COM interface for Word/PDF conversion |
+
+---
+
+## GitHub
+
+```
+https://github.com/rifattahmid/Auto-Resume-and-Cover-Letter-Tailor
+```

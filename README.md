@@ -26,6 +26,8 @@ The result is a letter that sounds like you, not like ChatGPT, because it mostly
 
 ## Setup
 
+> **Tip:** The `PROJECT_MEMORY.md` file in this repo is a full technical briefing of how the project works. If you get stuck at any point during setup, paste it into Claude, ChatGPT, or any AI assistant and describe your issue — it has everything the AI needs to help you configure, debug, or extend the tool.
+
 ### 1. Install dependencies
 
 ```bash

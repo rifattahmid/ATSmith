@@ -1,4 +1,4 @@
-# Auto Resume & Cover Letter Tailor
+# Auto Resume & Cover Letter Tailor 🪡
 
 Paste a job URL. Get a tailored resume and cover letter in seconds.
 

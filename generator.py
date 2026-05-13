@@ -147,15 +147,18 @@ def classify_job(title, description):
                         break
 
     # Specialist override: if a broad category wins with no title evidence,
-    # prefer the highest-scoring specialist category that has description signal.
-    # Broad categories are defined in keywords.json under "_broad_categories".
+    # prefer the highest-scoring specialist category that has description signal —
+    # but only if the specialist scores at least 60% of the broad winner's score.
+    # Prevents a weak specialist from unseating a dominant broad category.
     if best.lower() in broad_categories and title_scores.get(best, 0) == 0:
         specialists = [
             f for f in available
             if f.lower() not in broad_categories and scores.get(f, 0) > 0
         ]
         if specialists:
-            best = max(specialists, key=lambda f: (title_scores.get(f, 0), scores[f]))
+            top_specialist = max(specialists, key=lambda f: (title_scores.get(f, 0), scores[f]))
+            if scores[top_specialist] >= scores[best] * 0.6:
+                best = top_specialist
 
     print(f"  Job classified as: {best}\n")
     print("  Scores:")

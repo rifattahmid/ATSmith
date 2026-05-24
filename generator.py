@@ -2,6 +2,7 @@ import os
 import re
 import json
 import shutil
+import time
 import anthropic
 from datetime import datetime
 from docx import Document
@@ -285,10 +286,12 @@ def fill_cover_letter(path, company, title, intro, responsibilities, qualificati
     )
 
     client = anthropic.Anthropic()
-    message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=1000,
-        messages=[{"role": "user", "content": f"""Fill in the blank(s) (_) in each numbered sentence below.
+    for attempt in range(4):
+        try:
+            message = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=1000,
+                messages=[{"role": "user", "content": f"""Fill in the blank(s) (_) in each numbered sentence below.
 
 Role: {title}
 Company (USE EXACTLY THIS): {company}
@@ -307,7 +310,15 @@ Rules:
 - Fill _ with company/role-specific content: what the company does, why the applicant is drawn to this role or company
 - NEVER use em dashes (--) or en dashes (-)
 - Return ONLY the numbered sentences, nothing else"""}]
-    )
+            )
+            break
+        except anthropic.APIStatusError as e:
+            if e.status_code == 529 and attempt < 3:
+                wait = 10 * (attempt + 1)
+                print(f"  API overloaded — retrying in {wait}s...")
+                time.sleep(wait)
+            else:
+                raise
 
     response = message.content[0].text.strip()
 

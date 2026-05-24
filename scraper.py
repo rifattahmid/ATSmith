@@ -2,6 +2,7 @@ from playwright.sync_api import sync_playwright
 import anthropic
 import json
 import re
+import time
 
 
 def _company_from_url(url):
@@ -59,6 +60,12 @@ def scrape_job(url):
                     break
                 except Exception:
                     continue
+        else:
+            # For other JS-rendered SPAs, wait for network to settle so content loads
+            try:
+                page.wait_for_load_state("networkidle", timeout=10000)
+            except Exception:
+                pass
 
         _dismiss_cookie_popup(page)
 
@@ -133,15 +140,17 @@ def _dismiss_cookie_popup(page):
 def _extract_with_claude(raw_text, url=""):
     client = anthropic.Anthropic()
     url_hint = f"\nJob URL (use subdomain/path as hints for company and title if not clear from text): {url}" if url else ""
-    message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=1500,
-        messages=[{"role": "user", "content": f"""Extract structured job posting data from the text below.
+    for attempt in range(4):
+        try:
+            message = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=1500,
+                messages=[{"role": "user", "content": f"""Extract structured job posting data from the text below.
 
 Return ONLY valid JSON with these keys:
 - "title": a clean, professional job title suitable for use in a cover letter. Start from the posted title but use the full description to resolve ambiguity — expand abbreviations (e.g. "Snr" → "Senior"), pick the most fitting option when multiple levels or slash-separated titles are listed, and infer the actual role when the posted title is generic (e.g. "Team Member – Corporate Finance" → "Corporate Finance Associate"). Do not invent seniority not supported by the description.
 - "company": the commonly used short name for the hiring company, as a professional would write it in a cover letter. Strip legal suffixes (Berhad, Sdn Bhd, Pty Ltd, Ltd, Inc, Corp, Group, Holdings, etc.) unless they are part of the brand (e.g. "S&P Global" keeps "Global"). Use the well-known abbreviation or brand name when one exists (e.g. "RHB" not "RHB Banking Group", "Maybank" not "Malayan Banking Berhad"). Return "UNKNOWN" if you cannot determine the company with confidence (e.g. staffing agency or aggregator page).
-- "country": the country where the job is based (e.g. "Australia", "Malaysia", "United Kingdom") — return null if not determinable
+- "country": the physical country where this specific job is located (e.g. "Australia", "Malaysia", "United Kingdom"). Look for explicit location fields or city mentions in the posting (e.g. "Location: Kuala Lumpur" → "Malaysia"). Do NOT infer from the company's headquarters, the URL's regional path (e.g. /ca/en/ is a career portal region, not the job location), or the company's country of origin. Return null if the job location is not explicitly stated.
 - "intro": the introductory paragraph(s) before responsibilities/qualifications
 - "responsibilities": the responsibilities section text
 - "qualifications": the qualifications/requirements section text
@@ -150,7 +159,15 @@ Job posting text:
 {raw_text[:12000]}
 
 Return only the JSON object, no explanation."""}]
-    )
+            )
+            break
+        except anthropic.APIStatusError as e:
+            if e.status_code == 529 and attempt < 3:
+                wait = 10 * (attempt + 1)
+                print(f"  API overloaded — retrying in {wait}s...")
+                time.sleep(wait)
+            else:
+                raise
 
     raw = message.content[0].text.strip()
 

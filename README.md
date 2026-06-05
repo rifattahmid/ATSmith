@@ -41,6 +41,8 @@ playwright install msedge
 
 > **Tip:** After setup, you can run the tool without activating the venv each time by using `.\apply.ps1` (see Usage below).
 
+> **PowerShell execution policy:** If you get a script blocked error, run this once: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
+
 ### 2. Set your API key
 
 ```bash

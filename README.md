@@ -1,34 +1,70 @@
-# ApplyKit
+# ATSmith
 
-Paste a job URL. Get a tailored cover letter and packaged application documents in seconds.
+ATSmith is a local Windows-first job application generator for people who already have strong resume and cover letter templates.
 
----
+Paste a job URL. ATSmith creates a role-specific application folder with:
 
-## Why this is different from AI-generated cover letters
+- a copied clean resume PDF
+- a tailored resume PDF generated from marked resume sentences
+- a tailored cover letter PDF
+- a saved position description PDF
+- an optional combined cover-letter bundle with recommendations, transcripts, or other PDFs
 
-Most AI cover letter tools generate the entire letter from scratch — resulting in generic, interchangeable output that reads like it was written by an AI.
+ATSmith does not generate a resume from scratch. It edits only the parts you explicitly mark, keeps factual resume content grounded in your source files, and leaves the rest of your documents alone.
 
-This tool works differently. **You write the cover letter once, optimised to your voice, experience, and strengths.** The AI only fills in the small parts that need to change per application — the company name, what draws you to the role, why this specific organisation. Everything else stays exactly as you wrote it.
+## How It Works
 
-The result is a letter that sounds like you, not like ChatGPT, because it mostly is you.
+```mermaid
+flowchart TD
+    A[Paste job URL] --> B[Scrape job posting]
+    B --> C[Extract title, company, country, responsibilities, qualifications]
+    C --> D[Detect country profile from locations.json]
+    D --> E[Score job category from keywords.json]
+    E --> F[User confirms title, company, category]
+    F --> G[Copy clean resume PDF]
+    F --> H[Tailor marked resume sentences]
+    F --> I[Fill marked cover letter blanks]
+    H --> J[Export tailored resume PDF]
+    I --> K[Export tailored cover letter PDF]
+    J --> L[Check page limits]
+    K --> L
+    L --> M[Create application folder]
+```
 
----
+The tool is intentionally conservative:
 
-## What it does
+- Resume tailoring only touches full sentences wrapped in square brackets.
+- Cover letter tailoring only touches marked blanks.
+- The LLM receives factual source context and optional extended context.
+- Large `resume.extended.md` files are sectioned and filtered so only relevant sections are sent to the resume prompt.
+- Resume page-fit uses rollback: if the tailored resume exceeds the page limit, lower-priority resume edits are reverted first.
 
-1. Scrapes the job posting (title, company, country, responsibilities, qualifications)
-2. Auto-detects the job country and selects the right resume/cover letter template
-3. Classifies the role by category (Finance, Marketing, etc.) and picks the matching template
-4. Fills blanks in your cover letter (`_` and `[DESCRIPTION]`) with company- and role-specific language
-5. Converts to PDF and opens the output folder
+## Manual Sections
 
----
+Use this README in order:
 
-## Setup
+1. install ATSmith and configure LLM access
+2. configure folders, countries, and categories
+3. set up resume and cover letter templates
+4. add resume source/context files
+5. run ATSmith and review the generated outputs
+6. use troubleshooting and developer notes when something breaks
 
-> **Tip:** The `PROJECT_MEMORY.md` file in this repo is a full technical briefing of how the project works. If you get stuck at any point during setup, paste it into Claude, ChatGPT, or any AI assistant and describe your issue — it has everything the AI needs to help you configure, debug, or extend the tool.
+## Requirements
 
-### 1. Create a virtual environment and install dependencies
+ATSmith is built for this environment:
+
+- Windows
+- Python 3.10+
+- Microsoft Word installed
+- Microsoft Edge installed
+- an LLM API key for Anthropic, OpenAI, or an OpenAI-compatible provider
+
+PDF conversion uses Microsoft Word through `pywin32` when available, with `docx2pdf` as a fallback.
+
+## Install
+
+Clone or download the repository, then open PowerShell in the project folder.
 
 ```powershell
 python -m venv venv
@@ -37,174 +73,546 @@ pip install -r requirements.txt
 playwright install msedge
 ```
 
-> **Windows only:** `docx2pdf` requires Microsoft Word to be installed for PDF conversion.
+Copy the local config files:
 
-> **Tip:** After setup, you can run the tool without activating the venv each time by using `.\apply.ps1` (see Usage below).
-
-> **PowerShell execution policy:** If you get a script blocked error, run this once: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
-
-### 2. Set your API key
-
-```bash
-cp .env.example .env
+```powershell
+copy .env.example .env
+copy config.example.py config.py
+copy keywords.example.json keywords.json
+copy locations.example.json locations.json
 ```
 
-Edit `.env` and paste your LLM API key.
+These copied files are private/local and are ignored by Git.
 
-### 3. Configure paths
+## LLM-Assisted Setup
 
-```bash
-cp config.example.py config.py
+You can ask your preferred LLM to follow this README and configure ATSmith for you. Give it this guide, your intended folder layout, and the example config files, then ask it to produce the local `config.py`, `keywords.json`, and `locations.json` values you should use.
+
+Do not paste API keys, private references, real resume files, or confidential personal data into an external LLM unless you are comfortable sharing them. Use placeholders first, then replace the private values locally.
+
+Suggested prompt:
+
+```text
+Read this README and help me configure ATSmith. Ask me for the minimum folder, country, category, template filename, and LLM provider details you need. Then give me the exact values for config.py, keywords.json, and locations.json. Use placeholders for private paths and do not invent resume facts.
 ```
 
-Edit `config.py` and set all paths:
+## Configure LLM Access
 
-- `OUTPUT_BASE` — folder where generated applications are saved
-- `TEMPLATE_BASE` — folder containing your resume/cover letter template subfolders
-- `BUNDLE_APPENDIX` — PDFs to append after the cover letter into a combined bundle PDF (leave empty `[]` if not needed)
-- `BUNDLE_NAME` — filename for the bundle PDF (e.g. `"Cover Letter, Recommendations, Transcripts"`); defaults to `"Cover Letter Bundle"` if not set
-- `PROFILES` — if applying to multiple countries, define one profile per country with its own `OUTPUT_BASE` and `TEMPLATE_BASE`
+Open `.env` and add the API key for your provider.
 
-### 4. Set up your keyword map
+Anthropic:
 
-```bash
-cp keywords.example.json keywords.json
+```env
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
 ```
 
-Edit `keywords.json` so each key matches a subfolder name inside your `TEMPLATE_BASE`. Keywords are matched against the job title (3x weight) and description (1x weight) to pick the right template.
+OpenAI:
 
-Add a `"_broad_categories"` key listing any categories that are general fallbacks (e.g. Finance, Accounting). If a broad category wins with no title evidence but a specialist category has description signal, the specialist wins instead. Any category not listed in `"_broad_categories"` is treated as a specialist.
+```env
+OPENAI_API_KEY=your_openai_api_key_here
+```
+
+OpenAI-compatible endpoint:
+
+```env
+LLM_API_KEY=your_provider_api_key_here
+```
+
+Then open `config.py` and choose the provider:
+
+```python
+LLM_PROVIDER = "anthropic"            # Anthropic Claude
+# LLM_PROVIDER = "openai"             # OpenAI Responses API
+# LLM_PROVIDER = "openai-compatible"  # Custom OpenAI-compatible endpoint
+
+LLM_MODEL = None                      # required for openai-compatible
+LLM_BASE_URL = None                   # required only for openai-compatible
+```
+
+If you use `openai-compatible`, set `LLM_MODEL` to the provider's exact model or deployment name and set `LLM_BASE_URL`.
+
+## Configure Folders
+
+ATSmith needs two folder roots:
+
+- `OUTPUT_BASE`: where generated job application folders are saved
+- `TEMPLATE_BASE`: where your reusable templates live
+
+For a simple single-market setup:
+
+```python
+OUTPUT_BASE = r"C:\ATSmith\Applications\EXL"
+TEMPLATE_BASE = r"C:\ATSmith\Templates\EXL"
+```
+
+For a multi-country setup, use `PROFILES`:
+
+```python
+DEFAULT_PROFILE = "Exampleland"
+
+PROFILES = {
+    "Exampleland": {
+        "OUTPUT_BASE":   r"C:\ATSmith\Applications\EXL",
+        "TEMPLATE_BASE": r"C:\ATSmith\Templates\EXL",
+    },
+    "Freedonia": {
+        "OUTPUT_BASE":   r"C:\ATSmith\Applications\FDN",
+        "TEMPLATE_BASE": r"C:\ATSmith\Templates\FDN",
+    },
+}
+```
+
+`locations.json` must use the same country names as `PROFILES`.
+
+Example:
 
 ```json
-"_broad_categories": ["Finance", "Accounting", "Investment"]
+{
+  "Exampleland": ["exampleland", "example city", "northport"],
+  "Freedonia": ["freedonia", "freedonia city", "lakeside"]
+}
 ```
 
-### 5. Set up your location map (multi-country only)
+When a scraped job has a recognizable country, ATSmith selects that profile automatically. If detection fails, the CLI asks you to choose.
 
-```bash
-cp locations.example.json locations.json
+## Configure Categories
+
+Each top-level key in `keywords.json` must match a category folder under the selected `TEMPLATE_BASE`.
+
+Example:
+
+```json
+{
+  "_broad_categories": ["Finance", "Accounting", "Investment"],
+  "Finance": ["finance analyst", "fp&a", "budgeting", "forecasting"],
+  "Accounting": ["accounting", "general ledger", "reconciliation"],
+  "Investment": ["valuation", "portfolio", "investment analyst"]
+}
 ```
 
-Edit `locations.json` so each key matches a profile name in `PROFILES`. Values are city/country strings matched against the scraped job location.
+If your template folder is named `Fixed Income`, your `keywords.json` key must also be `Fixed Income`.
 
----
-
-## Template folder structure
-
-Your `TEMPLATE_BASE` folder should contain one subfolder per job category:
-
+```mermaid
+flowchart LR
+    A[keywords.json category key] --> B[Template category folder]
+    B --> C[Resume and cover letter templates]
 ```
+
+## Template Folder Layout
+
+Your selected `TEMPLATE_BASE` should contain one folder per job category.
+
+Single-country example:
+
+```text
 Templates/
 ├── Finance/
-│   ├── Resume.pdf
-│   └── Cover Letter.docx
-├── Marketing/
+│   ├── Applicant_Resume.docx
+│   ├── Applicant_Resume.pdf
+│   ├── Applicant_Resume_Edit.docx
+│   ├── Applicant_Cover Letter.docx
+│   ├── resume.source.md
+│   └── resume.extended.md
+├── Accounting/
 │   └── ...
-└── ...
+└── Investment/
+    └── ...
 ```
 
-Subfolder names must match the keys in `keywords.json`.
+Multi-country example:
 
-### Writing your cover letter template
+```text
+Templates/
+├── EXL/
+│   ├── resume.source.md
+│   ├── resume.extended.md
+│   ├── Finance/
+│   │   ├── Applicant_Resume.docx
+│   │   ├── Applicant_Resume.pdf
+│   │   ├── Applicant_Resume_Edit.docx
+│   │   ├── Applicant_Cover Letter.docx
+│   │   ├── resume.source.md
+│   │   └── resume.extended.md
+│   └── Investment/
+│       └── ...
+└── FDN/
+    └── ...
+```
 
-Write your cover letter in full — your background, experience, skills, and voice. Mark only the parts that need to change per application using one of two blank types:
+In multi-country mode, each profile normally points directly to one country template root, such as `Templates\EXL`.
 
-- **`_`** — for short fills: company name, role title, or a brief phrase
-- **`[DESCRIPTION]`** — for guided fills: write what you want Claude to say inside the brackets; it replaces the whole `[...]` with a natural sentence drawn from the job description
+## Required Files Per Category
 
-Only sentences containing a blank are sent to the AI. Everything else is untouched.
+Each category folder should contain:
 
-**Template:**
-> I am writing to express my keen interest in the Financial Analyst role at `_`.
+| File | Purpose |
+| --- | --- |
+| `Applicant_Resume.pdf` | Clean static resume PDF copied into the output folder first |
+| `Applicant_Resume.docx` | Clean editable original for your own records |
+| `Applicant_Resume_Edit.docx` | Resume template ATSmith edits |
+| `Applicant_Cover Letter.docx` | Cover letter template ATSmith fills |
+| `resume.source.md` | Factual source of truth for resume claims |
+| `resume.extended.md` | Optional transferable/adjacent phrasing context |
 
-> I applied because [WHAT DRAWS YOU TO THIS COMPANY — their investment mandate, analytical culture, or market position].
+The exact file names can vary if you configure these globs in `config.py`:
 
-**Generated:**
-> I am writing to express my keen interest in the Financial Analyst role at RHB.
+```python
+RESUME_ORIGINAL_PDF_GLOB = "*_Resume.pdf"
+RESUME_EDITABLE_DOCX_GLOB = "*_Resume_Edit.docx"
+COVER_LETTER_DOCX_GLOB = "*Cover Letter.docx"
+```
 
-> I applied because RHB's position as one of Southeast Asia's leading financial services groups means rigorous analysis directly informs strategic decisions at scale.
+## Resume Marker Rules
 
-The AI fills the blanks and nothing else. Your sentences stay your sentences.
+Resume editing is narrow by design.
 
-> **Page limit:** After generating, the tool checks the cover letter PDF page count and warns if it exceeds one page.
+Only a full sentence wrapped in square brackets is editable:
 
----
+```text
+[Developed and maintained financial models to support budgeting cycles, rolling forecasts, and scenario analysis.]
+```
 
-## Usage
+ATSmith sends that sentence to the LLM without the brackets and asks for either a compact role-specific edit or a skip.
 
-Run from a terminal in the ApplyKit folder:
+Inline markers are ignored:
+
+```text
+Developed [FILL] financial models.
+```
+
+Old command wrappers are ignored:
+
+```text
+[RESUME_BULLET: Developed financial models.]
+```
+
+Clean resume files should not contain brackets. Only the `_Edit.docx` resume should contain editable bracketed sentences.
+
+## Resume Context Files
+
+`resume.source.md` is the factual source of truth.
+
+Use it for facts the resume may directly claim:
+
+```markdown
+# Resume Source
+
+## Example Infrastructure Co
+
+- Built a rolling budget and forecasting model for a capital-intensive operating business.
+- Developed a contract-driven revenue scenario model across multiple customer groups.
+```
+
+`resume.extended.md` is optional adjacent context.
+
+Use it for careful transferable language, not new facts:
+
+```markdown
+### FP&A, Budgeting & Forecasting
+
+**Source basis:** Built budget and forecasting models.
+
+**Supported transferable language:** FP&A support, rolling forecast, budget performance tracking.
+
+**Example safe usage:** Supported FP&A planning cycles through rolling forecast models.
+
+**Boundaries:** Do not claim budget approval authority.
+```
+
+A sanitized starter example is included at `resume.extended.example.md` in the project root. Copy it into a category folder as `resume.extended.md`, then replace the example source basis, keywords, and boundaries with your own facts.
+
+ATSmith searches for context files in this order:
+
+1. category folder: `TEMPLATE_BASE/<Category>/resume.source.md`
+2. country/template folder: `TEMPLATE_BASE/resume.source.md`
+3. project fallback: `resume.source.md` in the repository folder
+
+The same search order applies to `resume.extended.md`.
+
+Large `resume.extended.md` files are parsed into sections. By default, ATSmith sends only the most relevant sections to the resume prompt.
+
+```mermaid
+flowchart TD
+    A[Full resume.extended.md] --> B[Parse sections]
+    B --> C[Score against job text and marked resume sentences]
+    C --> D[Select top relevant sections]
+    D --> E[Send selected context to LLM]
+```
+
+Useful settings:
+
+```python
+RESUME_EXTENDED_SELECTION_ENABLED = True
+RESUME_EXTENDED_MAX_SECTIONS = 8
+RESUME_EXTENDED_MAX_CHARS = 12000
+RESUME_EXTENDED_MIN_SCORE = 2
+```
+
+## Resume Page Limit
+
+The resume page limit is configurable:
+
+```python
+RESUME_PAGE_LIMIT = 1
+```
+
+If the tailored resume PDF exceeds the limit, ATSmith reverts accepted resume edits by priority:
+
+```mermaid
+flowchart TD
+    A[Tailored resume PDF] --> B{Within page limit?}
+    B -->|Yes| C[Keep tailored PDF]
+    B -->|No| D[Revert low-priority edits]
+    D --> E[Regenerate PDF]
+    E --> B
+    B -->|Still too long| F[Revert medium, then high-priority edits]
+```
+
+If the resume still does not fit after all edits are reverted, ATSmith leaves the latest PDF and prints a warning.
+
+## Cover Letter Markers
+
+Write most of the cover letter in final wording. Mark only the parts that should change per job.
+
+Supported markers:
+
+| Marker | Use |
+| --- | --- |
+| `_` | Short fill, usually company, role, or phrase-level text |
+| `[DESCRIPTION]` | Guided sentence or paragraph fill |
+| `[OPTIONAL: ...]` or `OPTIONAL: ...` | Optional guided fill. If the role does not directly support it, ATSmith deletes the marked sentence. |
+
+Example template:
+
+```text
+I am writing to express my interest in the Planning Analyst role at _.
+
+I applied because [WHAT DRAWS YOU TO THIS COMPANY].
+```
+
+Example output:
+
+```text
+I am writing to express my interest in the Planning Analyst role at Northstar Analytics.
+
+I applied because Northstar Analytics gives finance teams a direct role in commercial planning across complex operating units.
+```
+
+Only sentences containing a marker are sent to the LLM. Everything else in the cover letter stays untouched.
+
+For optional sections, keep the instruction plain. Prefer `[OPTIONAL: add one sentence about relevant ERP experience if directly supported, else delete]` or `OPTIONAL: add one sentence about relevant ERP experience if directly supported, else delete` over nested placeholder wording like `[X]` and `[Y]`.
+
+## Cover Letter Page Limit
+
+The cover letter page limit is configurable:
+
+```python
+COVER_LETTER_PAGE_LIMIT = 1
+PAGE_FIT_MAX_ATTEMPTS = 2
+PAGE_FIT_MAX_LINES_PER_ATTEMPT = 4
+PAGE_FIT_MIN_LINE_RETAIN_RATIO = 0.88
+```
+
+If the rendered cover letter exceeds the page limit, ATSmith asks the LLM to micro-shorten a few long lines. It rejects rewrites that cut too aggressively.
+
+## Optional Bundle PDF
+
+You can append recommendations, transcripts, or other PDFs after the cover letter:
+
+```python
+BUNDLE_NAME = "Cover Letter, Recommendations, Transcripts"
+
+BUNDLE_APPENDIX = [
+    r"C:\ATSmith\Documents\Recommendation.pdf",
+    r"C:\ATSmith\Documents\Transcript.pdf",
+]
+```
+
+Leave `BUNDLE_APPENDIX = []` if you do not want a bundle.
+
+## Run ATSmith
+
+From the project folder:
 
 ```powershell
 .\apply.ps1
 ```
 
-Or, if you have the venv active:
+Or, with the virtual environment active:
 
 ```powershell
 python apply.py
 ```
 
-Paste the job URL when prompted. The tool auto-detects the country, classifies the role, then asks you to confirm the title, company, and category before generating your application. After each application is saved, it loops back and prompts for the next URL. Type `q` or press Enter on a blank line to exit.
+The CLI will:
 
-> The browser runs headless (no window appears) during scraping.
+1. ask for a job URL
+2. scrape and extract the posting
+3. detect the country profile
+4. classify the category
+5. show the detected title, company, and category
+6. let you proceed or edit the values
+7. generate the application folder
 
-### Bot-protected pages
+Type `q`, `quit`, `exit`, or press Enter on a blank prompt to stop.
 
-Some job sites (e.g. CBRE) block headless browsers. When this happens the tool detects it automatically and prompts:
+## Example CLI Flow
 
-1. Go to the job posting in your browser
-2. Select all text (`Ctrl+A`) and copy (`Ctrl+C`)
-3. Come back to the terminal and press Enter — **do not paste into the terminal**
+```text
+Paste job URL (or q to quit): https://example.com/jobs/planning-analyst
 
-The tool reads your clipboard silently and continues as normal.
+  Country:  Exampleland
 
+  Job classified as: Finance
 
----
+  Scores:
+    Accounting            1  (title: 0)
+    Finance               8  (title: 3) <--
+    Investment            2  (title: 0)
 
-## Single vs multi-country setup
+  Title:    Planning Analyst
+  Company:  Northstar Analytics
+  Category: Finance
 
-**Single country** — set `OUTPUT_BASE` and `TEMPLATE_BASE` directly in `config.py`. No country prompt appears.
+? Proceed with these? Yes
 
-**Multiple countries** — define `PROFILES` in `config.py` and populate `locations.json`. Country is auto-detected from the job posting; the prompt only appears if detection fails.
+  Resume source of truth: Found
+  Resume extended context: Found, selected 6/46 sections
+
+  Resume
+    Markers: 16 | Edited: 7 | Skipped: 9
+    Aggression: balanced
+
+    Edits:
+      1. + rolling forecast
+      4. + management reporting
+
+  Resume PDF: C:\ATSmith\Applications\EXL\Northstar Analytics - Planning Analyst\Applicant_Resume.pdf
+  Cover letter PDF: C:\ATSmith\Applications\EXL\Northstar Analytics - Planning Analyst\Applicant_Cover Letter.pdf
+
+Done! Saved to: C:\ATSmith\Applications\EXL\Northstar Analytics - Planning Analyst
+```
+
+## Output Folder
+
+Each job gets its own folder:
+
+```text
+OUTPUT_BASE/
+└── Company - Job Title/
+    ├── Applicant_Resume.pdf
+    ├── Applicant_Resume_Edit.docx
+    ├── Applicant_Cover Letter.docx
+    ├── Applicant_Cover Letter.pdf
+    ├── Position Description.pdf
+    └── Cover Letter, Recommendations, Transcripts.pdf
+```
+
+The original static resume PDF is copied first. If resume markers are present, ATSmith exports the tailored resume PDF using `RESUME_TAILORED_PDF_NAME`, which defaults to the clean resume name without `_Edit`.
+
+## Bot-Protected Pages
+
+Some job sites block headless browsers. If ATSmith detects a blocked page, it prompts you to:
+
+1. open the job posting in your browser
+2. select all text with `Ctrl+A`
+3. copy with `Ctrl+C`
+4. return to the terminal and press Enter
+
+ATSmith reads the clipboard and continues.
+
+If structured job extraction returns malformed JSON, ATSmith asks the configured LLM to repair the JSON once. If repair still fails, it stops with a clear error instead of generating documents from empty job fields.
+
+## Troubleshooting
+
+### Missing Template File
+
+Check that the selected category folder contains the required resume PDF and cover letter DOCX.
+
+If you use custom file names, update:
 
 ```python
-# config.py
-PROFILES = {
-    "United States": {
-        "OUTPUT_BASE":   r"C:\...\Applications\US",
-        "TEMPLATE_BASE": r"C:\...\Templates\US",
-    },
-    "United Kingdom": {
-        "OUTPUT_BASE":   r"C:\...\Applications\UK",
-        "TEMPLATE_BASE": r"C:\...\Templates\UK",
-    },
-}
+RESUME_ORIGINAL_PDF_GLOB
+RESUME_EDITABLE_DOCX_GLOB
+COVER_LETTER_DOCX_GLOB
 ```
+
+### Wrong Country
+
+Update `locations.json` so the country key matches a `PROFILES` key in `config.py`.
+
+Example:
 
 ```json
-// locations.json
 {
-  "United States": ["united states", "new york", "san francisco", "chicago"],
-  "United Kingdom": ["united kingdom", "london", "manchester", "edinburgh"]
+  "Exampleland": ["exampleland", "example city", "northport"]
 }
 ```
 
----
+### Wrong Category
 
-## Personalisation summary
+Update `keywords.json` with better title and description keywords for that category.
 
-| File | What to configure |
-|------|------------------|
-| `config.py` | All folder paths, country profiles, bundle files |
-| `keywords.json` | Job categories and their matching keywords |
-| `locations.json` | Country/city strings mapped to each profile |
-| `Cover Letter.docx` | Your template — write it fully, use `_` or `[DESCRIPTION]` for company/role-specific sentences |
+You can also override the detected category in the CLI before generation.
 
----
+### Resume Goes Over One Page
 
-## Requirements
+Options:
 
-- Python 3.9+
-- Windows (for `docx2pdf` via Microsoft Word)
-- Microsoft Edge (used by Playwright for scraping)
-- LLM API key (default: Anthropic Claude — [get one here](https://console.anthropic.com))
+1. lower the number of editable bracketed resume sentences
+2. use shorter original resume wording
+3. reduce `RESUME_EXTENDED_MAX_SECTIONS`
+4. keep `RESUME_PAGE_LIMIT = 1` and let ATSmith roll back low-priority edits
+5. set `RESUME_PAGE_LIMIT = 2` if your resume is intentionally two pages
+
+### PDF Conversion Fails
+
+Make sure:
+
+- Microsoft Word is installed
+- the DOCX file is not already open
+- output folders are writable
+
+If PDF conversion fails, ATSmith prints the warning and finishes with:
+
+```text
+Done with warnings!
+```
+
+### Bot Protection
+
+Use the manual clipboard fallback. Copy the job page text from your browser, then return to the terminal and press Enter.
+
+## Developer Map
+
+```mermaid
+flowchart LR
+    A[apply.py] --> B[scraper.py]
+    A --> C[classifier.py]
+    A --> D[generator.py]
+    D --> E[resume_context.py]
+    D --> F[llm.py]
+    B --> F
+```
+
+Main modules:
+
+| File | Responsibility |
+| --- | --- |
+| `apply.py` | CLI loop, country/profile selection, confirmation prompts |
+| `scraper.py` | Playwright scraping, bot fallback, structured job extraction |
+| `classifier.py` | Keyword loading and category scoring |
+| `resume_context.py` | Resume source discovery and extended-context section selection |
+| `generator.py` | DOCX edits, PDF export, page fitting, bundle generation |
+| `llm.py` | Provider-neutral LLM calls and retry handling |
+| `constants.py` | Internal tuning constants |
+
+## Sanity Checks
+
+If you keep tests locally, run:
+
+```powershell
+.\venv\Scripts\python.exe -m pytest tests -q -p no:cacheprovider
+python -m py_compile apply.py scraper.py generator.py llm.py constants.py config.example.py classifier.py resume_context.py
+git diff --check
+```

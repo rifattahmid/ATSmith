@@ -8,8 +8,12 @@ from constants import (
     WORKDAY_SELECTOR_TIMEOUT,
     NETWORKIDLE_TIMEOUT,
 )
-from llm import call_claude
+from llm import call_llm
 
+
+# =============================================================================
+# URL Fallback Helpers
+# =============================================================================
 
 def _company_from_url(url):
     """Extract company name from known ATS URL patterns.
@@ -39,6 +43,10 @@ def _title_from_url(url):
     slug = re.sub(r"_\d{4}-\d+$", "", path)   # strip trailing job-id like _2026-15510
     return slug.replace("-", " ").strip() or None
 
+
+# =============================================================================
+# Browser Scrape Flow
+# =============================================================================
 
 def scrape_job(url):
     with sync_playwright() as p:
@@ -113,7 +121,7 @@ def scrape_job(url):
         if not raw_text or not raw_text.strip():
             raise RuntimeError("Clipboard is empty — copy the job page text first, then run again.")
 
-    structured = _extract_with_claude(raw_text, url=url)
+    structured = _extract_with_llm(raw_text, url=url)
 
     company = structured.get("company", "UNKNOWN")
     if company == "UNKNOWN":
@@ -134,6 +142,10 @@ def scrape_job(url):
     }
 
 
+# =============================================================================
+# Bot Detection And Manual Fallback
+# =============================================================================
+
 def _is_blocked(text: str) -> bool:
     if not text or len(text.strip()) < 50:
         return True
@@ -143,6 +155,9 @@ def _is_blocked(text: str) -> bool:
     return any(s in lower for s in signals)
 
 
+# =============================================================================
+# Page Cleanup Helpers
+# =============================================================================
 
 def _hide_overlays(page):
     """Inject CSS to hide common popup/modal/overlay elements before PDF capture.
@@ -219,7 +234,11 @@ def _dismiss_cookie_popup(page):
             continue
 
 
-def _extract_with_claude(raw_text, url=""):
+# =============================================================================
+# LLM Extraction
+# =============================================================================
+
+def _extract_with_llm(raw_text, url=""):
     url_hint = f"\nJob URL (use subdomain/path as hints for company and title if not clear from text): {url}" if url else ""
     prompt = f"""Extract structured job posting data from the text below.
 
@@ -236,13 +255,52 @@ Job posting text:
 
 Return only the JSON object, no explanation."""
 
-    raw = call_claude(prompt, max_tokens=1500)
+    raw = call_llm(prompt, max_tokens=1500)
 
-    # Strip markdown code fences if present
-    raw = re.sub(r"^```(?:json)?\s*", "", raw)
-    raw = re.sub(r"\s*```$", "", raw)
-
+    parse_error = None
     try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return {"title": "", "company": "UNKNOWN", "country": None, "intro": "", "responsibilities": "", "qualifications": ""}
+        return _load_llm_json(raw)
+    except (json.JSONDecodeError, ValueError) as first_error:
+        parse_error = first_error
+        print("  Job extraction JSON was invalid; asking LLM to repair once.")
+
+    repaired = call_llm(_json_repair_prompt(raw, parse_error), max_tokens=1500)
+    try:
+        return _load_llm_json(repaired)
+    except (json.JSONDecodeError, ValueError) as second_error:
+        raise RuntimeError("Could not parse job posting JSON after one repair attempt.") from second_error
+
+
+def _load_llm_json(raw):
+    cleaned = _strip_json_fences(raw)
+    parsed = json.loads(cleaned)
+    if not isinstance(parsed, dict):
+        raise ValueError("Job extraction JSON root must be an object.")
+    return parsed
+
+
+def _strip_json_fences(raw):
+    cleaned = raw.strip()
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    return cleaned.strip()
+
+
+def _json_repair_prompt(raw, error):
+    return f"""Repair this invalid JSON from the job extraction step.
+
+Return ONLY one valid JSON object with these keys:
+- "title"
+- "company"
+- "country"
+- "intro"
+- "responsibilities"
+- "qualifications"
+
+Parser error:
+{error}
+
+Invalid JSON:
+```text
+{raw}
+```"""

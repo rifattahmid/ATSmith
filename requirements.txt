@@ -1,4 +1,5 @@
 anthropic
+openai
 python-docx
 docx2pdf
 pypdf
@@ -7,3 +8,4 @@ playwright
 pywin32
 questionary
 pyperclip
+pytest
